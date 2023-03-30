@@ -10,7 +10,7 @@ global pause
 pause = False
 def change_mode():
     global map_mode
-    map_mode = (map_mode + 1) % 5
+    map_mode = (map_mode + 1) % 6
     # msgbox.showinfo( "Hello Python", f"New mode: {map_mode}")
     #global pause
     #pause = not pause
@@ -63,7 +63,7 @@ Button(control_panel, text ="phase5", command = tm.phase5).pack()
 Button(control_panel, text ="phase6", command = tm.phase6).pack()
 Button(control_panel, text ="save map", command = save_map).pack()
 
-refresh_rate = 200
+refresh_rate = 2000
 
 def message():
     global md

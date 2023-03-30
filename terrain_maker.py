@@ -101,6 +101,8 @@ class TerrainMaker():
 		'island',
 		'bio_ids',
 		'provinces',
+		'ocean',
+		'areas',
 		]
 
 		self.attr = [
@@ -111,6 +113,13 @@ class TerrainMaker():
 			'island_sizes',
 			'bio_sizes',
 			'bio_types',
+			'island_provs',
+			'province_locs',
+			'area_locs',
+			'num_provs',
+			'num_areas',
+			'prov_areas',
+			'area_provs',
 		]
 
 		self.color_noise = np.random.uniform(-1, 1, (height,width,3))
@@ -148,20 +157,12 @@ class TerrainMaker():
 		self.seed = world_seed
 		self.t0 = time.perf_counter()
 
-		if(skip < 1):
-			self.phase1()
-			self.orig_elevation = self.elevation
-		if(skip < 2):
-			self.phase2()
-		if(skip < 3):
-			self.phase3()
-		if(skip < 4):
-			self.elevation = self.orig_elevation[:,:]
-			self.phase4()
-		if(skip < 5):
-			self.phase5()
-		if(skip < 6):
-			self.phase6()
+		if(skip < 1): self.phase1()
+		if(skip < 2): self.phase2()
+		if(skip < 3): self.phase3()
+		if(skip < 4): self.phase4()
+		if(skip < 5): self.phase5()
+		if(skip < 6): self.phase6()
 
 	def phase1(self):
 		self.elevation = self.noise_map()
@@ -177,6 +178,8 @@ class TerrainMaker():
 		self.slope = np.linalg.norm(self.slope_vectors, axis=2)
 		print(f"Calculating Slope Vectors - {time.perf_counter()-self.t0:.2f}")
 
+		self.orig_elevation = self.elevation
+
 	def phase2(self):
 		self.build_currents()
 		print(f"Stirring Ocean - {time.perf_counter()-self.t0:.2f}")
@@ -191,6 +194,7 @@ class TerrainMaker():
 		print(f"Simulating Clouds - {time.perf_counter()-self.t0:.2f}")
 
 	def phase4(self):
+		self.elevation = self.orig_elevation[:,:]
 		self.simulate_erosion()
 		print(f"Simulating Erosion - {time.perf_counter()-self.t0:.2f}")
 
@@ -222,9 +226,29 @@ class TerrainMaker():
 		self.segment_provinces()
 		print(f"Segmenting provinces - {time.perf_counter()-self.t0:.2f}")
 
+		self.group_areas()
+		print(f"Grouping areas - {time.perf_counter()-self.t0:.2f}")
+
+	def group_areas(self):
+		self.num_areas = int(self.num_provs / 5)
+		self.area_provs = {i:[] for i in range(self.num_areas)}
+		self.prov_areas = []
+		km = KMeans(n_clusters=self.num_areas, random_state=0)
+		preds = km.fit_predict(np.array(self.province_locs))
+		for i in range(self.num_provs):
+			self.area_provs[preds[i]].append(i)
+			self.prov_areas.append(preds[i])
+		self.area_locs = [(km.cluster_centers_[i, 0], km.cluster_centers_[i, 1]) for i in range(self.num_areas)]
+
+		removed_ocean = self.provinces + self.ocean
+		self.areas = np.array(self.prov_areas)[removed_ocean]
+		self.areas = (self.areas * (1 - self.ocean)) - self.ocean
 
 	def segment_provinces(self):
 		self.provinces = np.full(self.water.shape,-1)
+		self.province_locs = []
+		self.prov_types = []
+		self.island_provs = {isle:set() for isle in range(len(self.island_sizes))}
 		points = {i:[] for i in range(len(self.bio_sizes))}
 		for y in range(self.height):
 			for x in range(self.width):
@@ -235,10 +259,20 @@ class TerrainMaker():
 		for i, size in enumerate(self.bio_sizes):
 			k = max(1, int(size / PROVINCE_SIZE))
 			assert(len(points[i]) > 0)
-			preds = KMeans(n_clusters=k, random_state=0).fit_predict(points[i])
-			for i, (x, y) in enumerate(points[i]):
-				self.provinces[y, x] = preds[i] + tot_provs
+			km = KMeans(n_clusters=k, random_state=0)
+			preds = km.fit_predict(points[i])
+			centers = km.cluster_centers_
+			for j, (x, y) in enumerate(points[i]):
+				self.provinces[y, x] = preds[j] + tot_provs
+			self.province_locs.extend([(int(centers[j,0]),int(centers[j,1])) for j in range(k)])
 			tot_provs += k
+		for y in range(self.height):
+			for x in range(self.width):
+				isle = self.island[y, x]
+				if(isle == -1): continue
+				self.island_provs[isle].add(self.provinces[y, x])
+			
+		self.num_provs = tot_provs
 
 	def eliminate_microbiomes(self):
 		self.find_bios()
@@ -338,10 +372,8 @@ class TerrainMaker():
 		return size
 
 	def define_oceans(self):
-		self.ocean = np.full(self.slope.shape, -1)
-
-		self.explore(0, 0, 0, self.ocean, True)
-		self.ocean += 1
+		self.ocean = np.full(self.slope.shape, 0)
+		self.explore(0, 0, 1, self.water, self.ocean)
 
 	def build_rivers(self):
 		inertia = 0.01

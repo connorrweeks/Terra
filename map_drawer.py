@@ -77,9 +77,10 @@ class MapDrawer():
         self.draw = None
         self.isle_colors = None
         self.prov_colors = None
+        self.area_colors = None
 
         self.view_int = 0
-        self.view_functions = {"land":self.view3, "biome":self.view1, "island":self.view2, "wind":self.view4, "province":self.province_view}
+        self.view_functions = {"land":self.view3, "biome":self.view1, "island":self.view2, "wind":self.view4, "area":self.area_view ,"province":self.province_view}
 
     def set_view_int(self, view_int):
         self.view_int = view_int
@@ -153,11 +154,34 @@ class MapDrawer():
         return cm.astype(np.uint8)
 
 
+    def area_view(self, tm):
+        t0 = time.perf_counter()
+
+        if (self.area_colors is None):
+            self.area_colors = np.random.randint(100, 255, (np.max(tm.areas)+1, 3)).astype(np.uint8)
+        # print(isle_colors.shape)
+
+        arr = tm.elevation
+        cm = np.zeros(list(arr.shape) + [3])
+
+        province_mask = (tm.areas != -1).astype(np.uint8)
+        province_colors = self.area_colors[np.abs(tm.areas).astype(np.uint8)]
+
+        cm = self.view1(tm)
+        cm = cm * (1 - province_mask)[:, :, None]
+        cm += province_colors * province_mask[:, :, None]
+
+        print(f'view2: {time.perf_counter() - t0:.2f}')
+
+        #cm = self.draw_deposits(tm.deposits, cm)
+
+        return cm.astype(np.uint8)
+
     def province_view(self, tm):
         t0 = time.perf_counter()
 
         if (self.prov_colors is None):
-            self.prov_colors = np.random.randint(100, 255, (np.max(tm.provinces), 3)).astype(np.uint8)
+            self.prov_colors = np.random.randint(100, 255, (np.max(tm.provinces)+1, 3)).astype(np.uint8)
         # print(isle_colors.shape)
 
         arr = tm.elevation
