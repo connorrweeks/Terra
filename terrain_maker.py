@@ -37,6 +37,8 @@ RIDGE_WIDTH = 25
 MICRO_CUTOFF = 100
 PROVINCE_SIZE = 50
 
+BIOME_AREA_SEPARATOR = 15
+
 step_map = np.vectorize(lambda x, k: math.ceil(x * k) / k)
 bin_map = np.vectorize(lambda x: 1.0 if x > 0.0 else 0.0)
 
@@ -76,12 +78,11 @@ def vec2ang(vec):
 	return angle
 
 class TerrainMaker():
-	def __init__(self, width, height):
+	def __init__(self, width=-1, height=-1):
 		self.width = int(width)
 		self.height = int(height)
 
-		self.elevation = np.zeros((self.height, self.width))
-		self.biome_map = np.zeros((self.height, self.width, 9))
+		self.t0 = time.perf_counter()
 
 		self.np_attr = [
 		'elevation',
@@ -119,10 +120,11 @@ class TerrainMaker():
 			'num_provs',
 			'num_areas',
 			'prov_areas',
+			'prov_types',
 			'area_provs',
 		]
 
-		self.color_noise = np.random.uniform(-1, 1, (height,width,3))
+		
 
 	def load_pickle(self, n):
 		p = f'./saves/{n}'
@@ -136,6 +138,8 @@ class TerrainMaker():
 			with open(p+'/'+a, 'rb') as f:
 				obj = pickle.load(f)
 			setattr(self, a, obj)
+		
+		self.color_noise = np.random.uniform(-1, 1, (self.height, self.width,3))
 
 	def save_pickle(self, n):
 		p = f'./saves/{n}'
@@ -144,13 +148,20 @@ class TerrainMaker():
 		os.makedirs(p)
 
 		for a in self.np_attr:
-			obj = getattr(self, a)
-			np.save(p+'/'+a, obj)
+			try:
+				obj = getattr(self, a)
+				np.save(p+'/'+a, obj)
+			except:
+				print("Save failed:", a)
 
 		for a in self.attr:
-			obj = getattr(self, a)
-			with open(p+'/'+a, 'wb+') as f:
-				pickle.dump(obj, f)
+			try:
+				obj = getattr(self, a)
+				with open(p+'/'+a, 'wb+') as f:
+					pickle.dump(obj, f)
+			except:
+				print("Save failed:", a)
+			
 
 	def generate(self, seed=0, skip=0):
 		#self.seed = r.randrange(0, 100) * 100
@@ -165,6 +176,10 @@ class TerrainMaker():
 		if(skip < 6): self.phase6()
 
 	def phase1(self):
+		self.elevation = np.zeros((self.height, self.width))
+		self.biome_map = np.zeros((self.height, self.width, 9))
+		self.color_noise = np.random.uniform(-1, 1, (self.height, self.width,3))
+
 		self.elevation = self.noise_map()
 		print(f"Generating Noise Map - {time.perf_counter()-self.t0:.2f}")
 
@@ -229,20 +244,27 @@ class TerrainMaker():
 		self.group_areas()
 		print(f"Grouping areas - {time.perf_counter()-self.t0:.2f}")
 
+
+
 	def group_areas(self):
-		self.num_areas = int(self.num_provs / 5)
+		self.num_areas = int(self.num_provs / 10)
 		self.area_provs = {i:[] for i in range(self.num_areas)}
 		self.prov_areas = []
 		km = KMeans(n_clusters=self.num_areas, random_state=0)
-		preds = km.fit_predict(np.array(self.province_locs))
+		one_hot_biomes = np.zeros((len(self.prov_types), max(self.prov_types)+1), dtype=int)
+		one_hot_biomes[np.arange(len(self.prov_types)),np.array(self.prov_types)] = BIOME_AREA_SEPARATOR
+		points = np.concatenate([np.array(self.province_locs), one_hot_biomes], axis=1)
+
+		preds = km.fit_predict(points)
 		for i in range(self.num_provs):
 			self.area_provs[preds[i]].append(i)
 			self.prov_areas.append(preds[i])
 		self.area_locs = [(km.cluster_centers_[i, 0], km.cluster_centers_[i, 1]) for i in range(self.num_areas)]
 
-		removed_ocean = self.provinces + self.ocean
-		self.areas = np.array(self.prov_areas)[removed_ocean]
-		self.areas = (self.areas * (1 - self.ocean)) - self.ocean
+		prov_no_water = self.provinces + self.water
+		self.areas = np.array(self.prov_areas)[prov_no_water.astype(int)]
+		self.areas = ((self.areas * (1 - self.water)) - self.water).astype(int)
+		print("Number of areas -", self.num_areas)
 
 	def segment_provinces(self):
 		self.provinces = np.full(self.water.shape,-1)
@@ -262,6 +284,7 @@ class TerrainMaker():
 			km = KMeans(n_clusters=k, random_state=0)
 			preds = km.fit_predict(points[i])
 			centers = km.cluster_centers_
+			self.prov_types.extend([self.bio_types[i]] * k)
 			for j, (x, y) in enumerate(points[i]):
 				self.provinces[y, x] = preds[j] + tot_provs
 			self.province_locs.extend([(int(centers[j,0]),int(centers[j,1])) for j in range(k)])
@@ -273,6 +296,7 @@ class TerrainMaker():
 				self.island_provs[isle].add(self.provinces[y, x])
 			
 		self.num_provs = tot_provs
+		print("Number of provinces -", self.num_provs)
 
 	def eliminate_microbiomes(self):
 		self.find_bios()

@@ -68,9 +68,7 @@ def softclip(x, a=0, b=1, c=5):
 
 
 class MapDrawer():
-    def __init__(self, w, h, view="biome"):
-        self.w = w
-        self.h = h
+    def __init__(self, view="biome"):
         self.view = view
 
         self.points = None
@@ -80,7 +78,7 @@ class MapDrawer():
         self.area_colors = None
 
         self.view_int = 0
-        self.view_functions = {"land":self.view3, "biome":self.view1, "island":self.view2, "wind":self.view4, "area":self.area_view ,"province":self.province_view}
+        self.view_functions = {"land":self.view3, "biome":self.view1, "island":self.view2, "wind":self.wind_view, "area":self.area_view ,"province":self.province_view}
 
     def set_view_int(self, view_int):
         self.view_int = view_int
@@ -92,6 +90,8 @@ class MapDrawer():
 
     def to_colors(self, tm):
         arr = tm.elevation
+        self.w = arr.shape[1]
+        self.h = arr.shape[0]
         v_slope = arr[1:, :] - arr[:-1, :]
         self.arr = arr
 
@@ -134,7 +134,7 @@ class MapDrawer():
         t0 = time.perf_counter()
 
         if (self.isle_colors is None):
-            self.isle_colors = np.random.randint(100, 255, (len(tm.island_sizes), 3)).astype(np.uint8)
+            self.isle_colors = np.random.randint(100, 255, (len(tm.island_sizes)+1, 3)).astype(np.uint8)
         # print(isle_colors.shape)
 
         arr = tm.elevation
@@ -164,8 +164,13 @@ class MapDrawer():
         arr = tm.elevation
         cm = np.zeros(list(arr.shape) + [3])
 
+        
+
         province_mask = (tm.areas != -1).astype(np.uint8)
-        province_colors = self.area_colors[np.abs(tm.areas).astype(np.uint8)]
+        province_colors = self.area_colors[np.abs(tm.areas).astype(int)]
+
+        border_mask = self.get_border_mask(tm.areas)
+        province_mask = province_mask * border_mask
 
         cm = self.view1(tm)
         cm = cm * (1 - province_mask)[:, :, None]
@@ -188,7 +193,7 @@ class MapDrawer():
         cm = np.zeros(list(arr.shape) + [3])
 
         province_mask = (tm.provinces != -1).astype(np.uint8)
-        province_colors = self.prov_colors[np.abs(tm.provinces).astype(np.uint8)]
+        province_colors = self.prov_colors[np.abs(tm.provinces).astype(int)]
 
         cm = self.view1(tm)
         cm = cm * (1 - province_mask)[:, :, None]
@@ -211,8 +216,9 @@ class MapDrawer():
         cm += np.array([255, 255, 255])[None, None, :] * arr[:, :, None]
         return cm.astype(np.uint8)
 
-    def view4(self, tm):
+    def wind_view(self, tm):
         arr = self.draw_vectors(tm.air_currents)
+        arr = arr / 2.0
         cm = self.view1(tm) * (1 - arr[:, :, None])
         cm += np.array([255, 255, 255])[None, None, :] * arr[:, :, None]
         return cm.clip(0,255).astype(np.uint8)
